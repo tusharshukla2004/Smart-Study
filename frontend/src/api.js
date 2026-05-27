@@ -22,10 +22,10 @@ async function api(method, path, body = null) {
     if (res.status === 401) {
       localStorage.removeItem('ss_token');
       localStorage.removeItem('ss_user');
-      if (!window.location.pathname.includes('login.html') &&
-          !window.location.pathname.includes('signup.html') &&
-          !window.location.pathname.includes('index.html')) {
-        window.location.href = 'login.html';
+      if (!window.location.pathname.includes('/login') &&
+          !window.location.pathname.includes('/signup') &&
+          window.location.pathname !== '/') {
+        window.location.href = '/login';
       }
       return data;
     }
@@ -93,7 +93,7 @@ const Session = {
   logout: () => {
     localStorage.removeItem('ss_token');
     localStorage.removeItem('ss_user');
-    window.location.href = 'login.html';
+    window.location.href = '/login';
   },
   // Update cached user locally (after profile update)
   updateUser: (user) => {
@@ -102,9 +102,11 @@ const Session = {
   // Require auth — redirect if not logged in
   requireAuth: () => {
     if (!localStorage.getItem('ss_token')) {
-      window.location.href = 'login.html';
+      window.location.href = '/login';
       return false;
     }
     return true;
   }
 };
+
+export { AuthAPI, UserAPI, GroupsAPI, TasksAPI, MatchAPI, Session };
