@@ -3,8 +3,7 @@
    Connects the frontend to the Express backend.
    ============================================ */
 
-const API_BASE = 'http://localhost:5000/api';
-
+const API_BASE = 'https://smart-study-1-mjl7.onrender.com/api';
 // ---- Core fetch wrapper ----
 async function api(method, path, body = null) {
   const token = localStorage.getItem('ss_token');

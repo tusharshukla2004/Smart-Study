@@ -46,7 +46,10 @@ const io = new Server(server, {
 
 // ---- Middleware ----
 // Allow all origins in development to avoid localhost vs 127.0.0.1 CORS issues
-app.use(cors());
+app.use(cors({
+  origin:"https://smart-study-xqyl.vercel.app",
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
