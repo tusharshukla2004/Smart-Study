@@ -47,7 +47,10 @@ const io = new Server(server, {
 // ---- Middleware ----
 // Allow local frontend to access backend
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: [
+    "http://localhost:5173",
+    "https://smart-study-8d5g.vercel.app"
+  ],
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
