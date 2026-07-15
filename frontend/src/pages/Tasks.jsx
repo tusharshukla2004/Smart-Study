@@ -1,40 +1,76 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
-
-const INITIAL_TASKS = [
-  { id: 1, text: 'Complete Chapter 7 exercises', subject: 'Mathematics', due: '2026-04-01', priority: 'high', done: false },
-  { id: 2, text: 'Review lecture notes on sorting algorithms', subject: 'Algorithms', due: '2026-03-30', priority: 'medium', done: true },
-  { id: 3, text: 'Watch ML tutorial series (episodes 1-5)', subject: 'Machine Learning', due: '2026-04-03', priority: 'low', done: false },
-  { id: 4, text: 'Prepare for physics quiz on thermodynamics', subject: 'Physics', due: '2026-03-31', priority: 'high', done: false },
-  { id: 5, text: 'Submit project proposal', subject: 'Research', due: '2026-04-05', priority: 'medium', done: true },
-];
+import { TasksAPI, Session } from '../api';
 
 const priorityBadge = { high: 'badge-danger', medium: 'badge-warning', low: 'badge-primary' };
 
 const Tasks = () => {
-  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [newTask, setNewTask] = useState({ text: '', subject: '', priority: 'medium' });
+  const [newTask, setNewTask] = useState({ title: '', subject: '', priority: 'medium', deadline: '' });
   const [activeTab, setActiveTab] = useState('all');
+  const [error, setError] = useState('');
 
-  const toggleDone = (id) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
+  // Fetch tasks from MongoDB on load
+  useEffect(() => {
+    if (!Session.isLoggedIn()) { window.location.href = '/login'; return; }
+    fetchTasks();
+  }, []);
+
+  const fetchTasks = async () => {
+    setLoading(true);
+    const res = await TasksAPI.getAll();
+    if (res.success) {
+      setTasks(res.tasks);
+    }
+    setLoading(false);
   };
 
-  const addTask = () => {
-    if (!newTask.text.trim()) return;
-    setTasks(prev => [...prev, { ...newTask, id: Date.now(), done: false, due: '' }]);
-    setNewTask({ text: '', subject: '', priority: 'medium' });
-    setShowModal(false);
+  // Toggle task done/pending in MongoDB
+  const toggleDone = async (task) => {
+    const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+    const res = await TasksAPI.update(task._id, { status: newStatus });
+    if (res.success) {
+      setTasks(prev => prev.map(t => t._id === task._id ? res.task : t));
+    }
+  };
+
+  // Delete task from MongoDB
+  const deleteTask = async (id) => {
+    const res = await TasksAPI.delete(id);
+    if (res.success) {
+      setTasks(prev => prev.filter(t => t._id !== id));
+    }
+  };
+
+  // Add new task to MongoDB
+  const addTask = async () => {
+    if (!newTask.title.trim()) return;
+    setError('');
+    const res = await TasksAPI.create({
+      title: newTask.title,
+      subject: newTask.subject,
+      priority: newTask.priority,
+      deadline: newTask.deadline || undefined
+    });
+    if (res.success) {
+      setTasks(prev => [...prev, res.task]);
+      setNewTask({ title: '', subject: '', priority: 'medium', deadline: '' });
+      setShowModal(false);
+    } else {
+      setError(res.message || 'Failed to add task.');
+    }
   };
 
   const filtered = tasks.filter(t => {
-    if (activeTab === 'pending') return !t.done;
-    if (activeTab === 'done') return t.done;
+    if (activeTab === 'pending') return t.status !== 'completed';
+    if (activeTab === 'done') return t.status === 'completed';
     return true;
   });
 
-  const completed = tasks.filter(t => t.done).length;
+  const completed = tasks.filter(t => t.status === 'completed').length;
+  const total = tasks.length;
 
   return (
     <div className="page-wrapper">
@@ -47,7 +83,7 @@ const Tasks = () => {
             <div>
               <h1 className="section-title" style={{ fontSize: '1.8rem' }}>Tasks &amp; <span>Goals</span></h1>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '4px' }}>
-                {completed} of {tasks.length} tasks completed
+                {completed} of {total} tasks completed
               </p>
             </div>
             <button className="btn btn-primary" onClick={() => setShowModal(true)}>➕ Add Task</button>
@@ -57,10 +93,10 @@ const Tasks = () => {
           <div className="card" style={{ marginBottom: '1.5rem' }}>
             <div className="progress-item-label">
               <span style={{ fontWeight: 600 }}>Overall Progress</span>
-              <span className="progress-pct">{Math.round((completed / tasks.length) * 100)}%</span>
+              <span className="progress-pct">{total > 0 ? Math.round((completed / total) * 100) : 0}%</span>
             </div>
             <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${Math.round((completed / tasks.length) * 100)}%` }}></div>
+              <div className="progress-fill" style={{ width: `${total > 0 ? Math.round((completed / total) * 100) : 0}%` }}></div>
             </div>
           </div>
 
@@ -79,26 +115,39 @@ const Tasks = () => {
 
           {/* Task List */}
           <div className="card">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {filtered.length === 0 && (
-                <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>No tasks here yet.</p>
-              )}
-              {filtered.map(t => (
-                <div key={t.id} className="task-item">
-                  <input
-                    type="checkbox"
-                    className="task-checkbox"
-                    checked={t.done}
-                    onChange={() => toggleDone(t.id)}
-                  />
-                  <div style={{ flex: 1 }}>
-                    <div className={`task-text ${t.done ? 'done' : ''}`}>{t.text}</div>
-                    <div className="task-subject">{t.subject}{t.due ? ` · Due ${t.due}` : ''}</div>
+            {loading ? (
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>⏳ Loading tasks...</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {filtered.length === 0 && (
+                  <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>
+                    No tasks here yet. Click ➕ Add Task to get started!
+                  </p>
+                )}
+                {filtered.map(t => (
+                  <div key={t._id} className="task-item">
+                    <input
+                      type="checkbox"
+                      className="task-checkbox"
+                      checked={t.status === 'completed'}
+                      onChange={() => toggleDone(t)}
+                    />
+                    <div style={{ flex: 1 }}>
+                      <div className={`task-text ${t.status === 'completed' ? 'done' : ''}`}>{t.title}</div>
+                      <div className="task-subject">
+                        {t.subject}{t.deadline ? ` · Due ${new Date(t.deadline).toLocaleDateString()}` : ''}
+                      </div>
+                    </div>
+                    <span className={`badge ${priorityBadge[t.priority] || 'badge-primary'}`}>{t.priority}</span>
+                    <button
+                      onClick={() => deleteTask(t._id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: '1rem', marginLeft: '8px' }}
+                      title="Delete task"
+                    >🗑️</button>
                   </div>
-                  <span className={`badge ${priorityBadge[t.priority]}`}>{t.priority}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -111,12 +160,13 @@ const Tasks = () => {
               <h3 className="modal-title">➕ Add New Task</h3>
               <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
+            {error && <p style={{ color: 'var(--danger)', fontSize: '0.875rem', marginBottom: '1rem' }}>{error}</p>}
             <div className="form-group">
-              <label className="form-label">Task</label>
+              <label className="form-label">Task Title</label>
               <input
                 type="text" className="form-input" placeholder="e.g. Complete chapter 5 exercises"
-                value={newTask.text}
-                onChange={e => setNewTask(p => ({ ...p, text: e.target.value }))}
+                value={newTask.title}
+                onChange={e => setNewTask(p => ({ ...p, title: e.target.value }))}
               />
             </div>
             <div className="form-group">
@@ -135,8 +185,16 @@ const Tasks = () => {
                 <option value="low">Low</option>
               </select>
             </div>
+            <div className="form-group">
+              <label className="form-label">Deadline (optional)</label>
+              <input
+                type="date" className="form-input"
+                value={newTask.deadline}
+                onChange={e => setNewTask(p => ({ ...p, deadline: e.target.value }))}
+              />
+            </div>
             <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} onClick={addTask}>
-              Add Task
+              💾 Save Task to Database
             </button>
           </div>
         </div>

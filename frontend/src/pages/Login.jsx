@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthAPI } from '../api';
+import { AuthAPI, Session } from '../api';
 import { showToast, validateEmail, validatePassword } from '../utils';
 
 const Login = () => {
@@ -33,26 +33,15 @@ const Login = () => {
 
     setLoading(true);
 
-    try {
-      // Mocked login or real API call depending on backend
-      const res = await AuthAPI.login(email, password);
-      if (res && res.success) {
-        localStorage.setItem('ss_token', res.token);
-        localStorage.setItem('ss_user', JSON.stringify(res.user));
-        showToast('Welcome back! Redirecting...', 'success');
-        setTimeout(() => navigate('/dashboard'), 1000);
-      } else {
-        showToast(res?.message || 'Login failed. Please try again.', 'error');
-      }
-    } catch (err) {
-      // Fallback for UI demonstration if no backend is running
-      showToast('Backend unavailable. Mocking login...', 'info');
-      localStorage.setItem('ss_token', 'mock_token');
-      localStorage.setItem('ss_user', JSON.stringify({ name: 'Alex Jordan', avatar: 'AJ' }));
+    const res = await AuthAPI.login(email, password);
+    if (res && res.success) {
+      Session.saveLogin(res.token, res.user);
+      showToast('Welcome back! Redirecting...', 'success');
       setTimeout(() => navigate('/dashboard'), 1000);
-    } finally {
-      setLoading(false);
+    } else {
+      showToast(res?.message || 'Login failed. Please check your credentials.', 'error');
     }
+    setLoading(false);
   };
 
   return (

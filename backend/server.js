@@ -45,9 +45,9 @@ const io = new Server(server, {
 });
 
 // ---- Middleware ----
-// Allow all origins in development to avoid localhost vs 127.0.0.1 CORS issues
+// Allow local frontend to access backend
 app.use(cors({
-  origin:"https://smart-study-xqyl.vercel.app",
+  origin: "http://localhost:5173",
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));

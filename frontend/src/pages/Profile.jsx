@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
+import { UserAPI, Session } from '../api';
 
 const SUBJECTS = [
   '📐 Mathematics', '⚛️ Physics', '🧪 Chemistry', '🧬 Biology',
@@ -9,38 +10,44 @@ const SUBJECTS = [
 
 const Profile = () => {
   const [user, setUser] = useState({
-    name: 'Alex Jordan',
-    email: 'alex@university.edu',
-    university: 'MIT',
-    major: 'Computer Science',
-    level: 'Undergraduate (Year 2)',
-    bio: 'Passionate about AI & machine learning. Looking for study partners for advanced algorithms.',
-    subjects: ['Mathematics', 'Computer Science', 'Machine Learning'],
-    studyHours: 24,
-    groupsJoined: 6,
-    tasksCompleted: 18,
-    streak: 12,
-    avatar: 'AJ',
+    name: '', email: '', university: '', major: '',
+    level: '', bio: '', subjects: [],
+    studyHours: 0, groupsJoined: 0, tasksCompleted: 0, streak: 0, avatar: '',
   });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ ...user });
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Fetch real profile from MongoDB on load
   useEffect(() => {
-    const cached = localStorage.getItem('ss_user');
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      setUser(prev => ({ ...prev, ...parsed }));
-      setDraft(prev => ({ ...prev, ...parsed }));
-    }
+    if (!Session.isLoggedIn()) { window.location.href = '/login'; return; }
+    const fetchProfile = async () => {
+      const res = await UserAPI.getProfile();
+      if (res.success) {
+        setUser(res.user);
+        setDraft(res.user);
+        Session.updateUser(res.user); // keep localStorage in sync as cache
+      } else {
+        // fallback to cached localStorage data
+        const cached = Session.getUser();
+        if (cached) { setUser(prev => ({ ...prev, ...cached })); setDraft(prev => ({ ...prev, ...cached })); }
+      }
+      setLoading(false);
+    };
+    fetchProfile();
   }, []);
 
-  const handleSave = () => {
-    setUser(draft);
-    localStorage.setItem('ss_user', JSON.stringify(draft));
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  // Save profile to MongoDB
+  const handleSave = async () => {
+    const res = await UserAPI.updateProfile(draft);
+    if (res.success) {
+      setUser(res.user);
+      Session.updateUser(res.user); // update localStorage cache too
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
   };
 
   const updateDraft = e => setDraft(p => ({ ...p, [e.target.name]: e.target.value }));

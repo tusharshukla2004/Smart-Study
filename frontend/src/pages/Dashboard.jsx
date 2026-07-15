@@ -1,40 +1,46 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import { UserAPI, GroupsAPI, TasksAPI, MatchAPI } from '../api';
-
-const REC_GROUPS = [
-  { id: 1, name: 'Advanced Algorithms', subject: 'Computer Science', members: 8, maxMembers: 10, avatar: '⚙️', tags: ['DSA', 'LeetCode'], matchScore: 95, level: 'Advanced', schedule: 'Mon & Wed 6pm' },
-  { id: 2, name: 'Calculus Masters', subject: 'Mathematics', members: 5, maxMembers: 8, avatar: '📐', tags: ['Calculus', 'Algebra'], matchScore: 87, level: 'Intermediate', schedule: 'Tue & Thu 4pm' },
-  { id: 3, name: 'ML Research Club', subject: 'Machine Learning', members: 12, maxMembers: 15, avatar: '🤖', tags: ['Neural Networks'], matchScore: 92, level: 'Advanced', schedule: 'Sat 10am' },
-];
-
-const ACTIVITIES = [
-  { icon: '👤', color: 'rgba(108,99,255,0.15)', title: 'Account created on Smart Study', time: 'Recently' },
-  { icon: '🎯', color: 'rgba(245,158,11,0.15)', title: 'Set study goals and track tasks', time: 'Get started →' },
-  { icon: '👥', color: 'rgba(6,182,212,0.15)', title: 'Join a study group to collaborate', time: 'Explore →' },
-];
+import { UserAPI, GroupsAPI, TasksAPI, MatchAPI, Session } from '../api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState({
-    name: 'Alex Jordan',
-    avatar: 'AJ',
-    studyHours: 24,
-    groupsJoined: 6,
-    tasksCompleted: 18,
-    streak: 12,
-    subjects: ['Mathematics', 'Computer Science', 'Machine Learning', 'Physics'],
-  });
+  const [user, setUser] = useState({ name: '', avatar: '', studyHours: 0, groupsJoined: 0, tasksCompleted: 0, streak: 0, subjects: [] });
+  const [groups, setGroups] = useState([]);
+  const [taskStats, setTaskStats] = useState({ total: 0, completed: 0 });
+  const [matches, setMatches] = useState([]);
   const [greeting, setGreeting] = useState('');
   const [showFindModal, setShowFindModal] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const cached = localStorage.getItem('ss_user');
-    if (cached) setUser(prev => ({ ...prev, ...JSON.parse(cached) }));
+    if (!Session.isLoggedIn()) { navigate('/login'); return; }
     const h = new Date().getHours();
     setGreeting(h < 12 ? 'Good morning ☀️' : h < 18 ? 'Good afternoon 🌤️' : 'Good evening 🌙');
+
+    // Fetch all real data from MongoDB
+    const loadData = async () => {
+      const [profileRes, groupsRes, tasksRes, matchRes] = await Promise.all([
+        UserAPI.getProfile(),
+        GroupsAPI.getAll(),
+        TasksAPI.getAll(),
+        MatchAPI.getMatches()
+      ]);
+
+      if (profileRes.success) {
+        setUser(profileRes.user);
+        Session.updateUser(profileRes.user);
+      } else {
+        const cached = Session.getUser();
+        if (cached) setUser(prev => ({ ...prev, ...cached }));
+      }
+      if (groupsRes.success) setGroups((groupsRes.groups || []).slice(0, 3));
+      if (tasksRes.success) setTaskStats({ total: tasksRes.stats.total, completed: tasksRes.stats.completed });
+      if (matchRes.success) setMatches((matchRes.matches || []).slice(0, 3));
+      setLoading(false);
+    };
+    loadData();
   }, []);
 
   const subjects = (user.subjects || ['Mathematics', 'Computer Science']).slice(0, 4).map((s, i) => {
@@ -78,7 +84,7 @@ const Dashboard = () => {
             <div className="stat-card">
               <div className="stat-icon green">✅</div>
               <div className="stat-info">
-                <div className="stat-value">{user.tasksCompleted}</div>
+                <div className="stat-value">{taskStats.completed}</div>
                 <div className="stat-label">Tasks Completed</div>
               </div>
             </div>
@@ -99,26 +105,27 @@ const Dashboard = () => {
                 <Link to="/groups" className="btn btn-ghost btn-sm">View All</Link>
               </div>
               <div className="groups-grid">
-                {REC_GROUPS.map(g => (
-                  <div key={g.id} className="group-card" onClick={() => navigate('/groups')}>
+                {groups.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', padding: '1rem 0', fontSize: '0.875rem' }}>No groups yet. <Link to="/groups">Create one!</Link></p>
+                ) : groups.map(g => (
+                  <div key={g._id} className="group-card" onClick={() => navigate('/groups')}>
                     <div className="group-card-header">
-                      <div className="group-emoji">{g.avatar}</div>
+                      <div className="group-emoji">{g.emoji || '📚'}</div>
                       <div>
                         <div className="group-name">{g.name}</div>
                         <div className="group-subject">{g.subject}</div>
                       </div>
                     </div>
                     <div className="group-meta">
-                      <span>👥 {g.members}/{g.maxMembers}</span>
-                      <span>📅 {g.schedule}</span>
+                      <span>👥 {(g.members || []).length}/{g.maxMembers || 10}</span>
+                      <span>📅 {g.schedule || 'Flexible'}</span>
                     </div>
                     <div className="group-tags">
-                      {g.tags.map(t => <span key={t} className="group-tag">{t}</span>)}
+                      {(g.tags || []).map(t => <span key={t} className="group-tag">{t}</span>)}
                     </div>
                     <div className="match-score">
                       <span className="match-dot"></span>
-                      <strong>{g.matchScore}%</strong> match
-                      <span className="badge badge-success" style={{ marginLeft: 'auto' }}>{g.level}</span>
+                      <span className="badge badge-success" style={{ marginLeft: 'auto' }}>{g.level || 'Open'}</span>
                     </div>
                   </div>
                 ))}
@@ -151,7 +158,11 @@ const Dashboard = () => {
                 <h2 style={{ fontFamily: "'Outfit', sans-serif", fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem' }}>⚡ Recent Activity</h2>
                 <div className="card">
                   <div className="activity-list">
-                    {ACTIVITIES.map((a, i) => (
+                    {[
+                      { icon: '👤', color: 'rgba(108,99,255,0.15)', title: 'Account created on Smart Study', time: 'Recently' },
+                      { icon: '🎯', color: 'rgba(245,158,11,0.15)', title: 'Set study goals and track tasks', time: 'Get started →' },
+                      { icon: '👥', color: 'rgba(6,182,212,0.15)', title: 'Join a study group to collaborate', time: 'Explore →' },
+                    ].map((a, i) => (
                       <div key={i} className="activity-item">
                         <div className="activity-icon" style={{ background: a.color }}>{a.icon}</div>
                         <div className="activity-text">
