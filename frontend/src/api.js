@@ -3,7 +3,7 @@
    Connects the frontend to the Express backend.
    ============================================ */
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = `${import.meta.env.VITE_API_URL}/api`;
 // ---- Core fetch wrapper ----
 async function api(method, path, body = null) {
   const token = localStorage.getItem('ss_token');

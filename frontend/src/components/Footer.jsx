@@ -10,7 +10,7 @@ const Footer = () => {
             <div className="footer-brand">📚 Smart Study</div>
             <p className="footer-desc">AI-powered platform connecting students worldwide for smarter, more collaborative learning experiences.</p>
             <div className="footer-social">
-              <a className="social-btn" href="#" title="Twitter">𝕏</a>
+              <a className="social-btn" href="#" title="Twitter">𝕏</a>S
               <a className="social-btn" href="#" title="LinkedIn">in</a>
               <a className="social-btn" href="#" title="Discord">💬</a>
               <a className="social-btn" href="#" title="Instagram">📸</a>
