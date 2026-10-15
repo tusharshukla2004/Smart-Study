@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Navigate, Outlet, Routes, Route } from 'react-router-dom';
 
 import Home from './pages/Home';
 import Login from './pages/Login';
@@ -11,6 +11,11 @@ import Chat from './pages/Chat';
 import Tasks from './pages/Tasks';
 
 import Navbar from './components/Navbar';
+import { Session } from './api';
+
+const ProtectedRoutes = () => (
+  Session.isLoggedIn() ? <Outlet /> : <Navigate to="/login" replace />
+);
 
 function App() {
   useEffect(() => {
@@ -32,11 +37,13 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/groups" element={<Groups />} />
-        <Route path="/chat" element={<Chat />} />
-        <Route path="/tasks" element={<Tasks />} />
+        <Route element={<ProtectedRoutes />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/groups" element={<Groups />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/tasks" element={<Tasks />} />
+        </Route>
       </Routes>
     </div>
   );

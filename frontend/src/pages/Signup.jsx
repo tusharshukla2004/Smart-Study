@@ -117,7 +117,7 @@ const Signup = () => {
 
     try {
       const res = await AuthAPI.signup(apiData);
-      if (res && res.success) {
+      if (res?.success) {
         localStorage.setItem('ss_token', res.token);
         localStorage.setItem('ss_user', JSON.stringify(res.user));
         showToast('Account created! Welcome to Smart Study 🎉', 'success');
@@ -125,11 +125,6 @@ const Signup = () => {
       } else {
         showToast(res?.message || 'Signup failed. Please try again.', 'error');
       }
-    } catch (err) {
-      showToast('Backend unavailable. Mocking signup...', 'info');
-      localStorage.setItem('ss_token', 'mock_token');
-      localStorage.setItem('ss_user', JSON.stringify({ name: apiData.name, avatar: apiData.avatar }));
-      setTimeout(() => navigate('/dashboard'), 1200);
     } finally {
       setLoading(false);
     }
@@ -143,7 +138,7 @@ const Signup = () => {
         <div className="auth-top">
           <span className="auth-logo">📚 Smart Study</span>
           <h1 className="auth-title">Create Your Account</h1>
-          <p className="auth-subtitle">Join 50,000+ students studying smarter</p>
+          <p className="auth-subtitle">Create an account to find study partners and organize your work</p>
         </div>
 
         {/* Step Indicator */}

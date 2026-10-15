@@ -48,7 +48,6 @@ const getMatches = asyncHandler(async (req, res) => {
     return {
       _id: user._id,
       name: user.name,
-      email: user.email,
       avatar: user.avatar,
       university: user.university,
       major: user.major,

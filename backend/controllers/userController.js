@@ -35,8 +35,7 @@ const updateProfile = asyncHandler(async (req, res) => {
   // Fields that are allowed to be updated
   const allowedFields = [
     'name', 'university', 'major', 'level', 'bio',
-    'subjects', 'availability', 'studyPreferences', 'avatar',
-    'studyHours', 'groupsJoined', 'tasksCompleted', 'streak'
+    'subjects', 'availability', 'studyPreferences', 'avatar'
   ];
 
   // Build update object from allowed fields only

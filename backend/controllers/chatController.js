@@ -13,7 +13,8 @@ const { asyncHandler } = require('../utils/helpers');
  */
 const getChatHistory = asyncHandler(async (req, res) => {
   const { groupId } = req.params;
-  const { limit = 50, before } = req.query;
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
 
   // Verify group exists
   const group = await StudyGroup.findById(groupId);
@@ -25,7 +26,7 @@ const getChatHistory = asyncHandler(async (req, res) => {
   }
 
   // Verify user is a member of the group
-  if (!group.members.includes(req.user._id)) {
+  if (!group.members.some(memberId => memberId.equals(req.user._id))) {
     return res.status(403).json({
       success: false,
       message: 'You must be a member of this group to view chat history.'
@@ -34,13 +35,20 @@ const getChatHistory = asyncHandler(async (req, res) => {
 
   // Build query (supports cursor-based pagination)
   const query = { groupId };
-  if (before) {
-    query.createdAt = { $lt: new Date(before) };
+  if (req.query.before) {
+    const before = new Date(req.query.before);
+    if (Number.isNaN(before.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid message cursor.'
+      });
+    }
+    query.createdAt = { $lt: before };
   }
 
   const messages = await Message.find(query)
     .sort({ createdAt: -1 })
-    .limit(parseInt(limit))
+    .limit(limit)
     .populate('senderId', 'name avatar');
 
   // Reverse to get chronological order
@@ -62,10 +70,10 @@ const sendMessage = asyncHandler(async (req, res) => {
   const { groupId } = req.params;
   const { content } = req.body;
 
-  if (!content || !content.trim()) {
+  if (typeof content !== 'string' || !content.trim() || content.trim().length > 2000) {
     return res.status(400).json({
       success: false,
-      message: 'Message content is required.'
+      message: 'Message must contain 1 to 2000 characters.'
     });
   }
 
@@ -79,7 +87,7 @@ const sendMessage = asyncHandler(async (req, res) => {
   }
 
   // Verify user is a member
-  if (!group.members.includes(req.user._id)) {
+  if (!group.members.some(memberId => memberId.equals(req.user._id))) {
     return res.status(403).json({
       success: false,
       message: 'You must be a member of this group to send messages.'

@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import { GroupsAPI, Session } from '../api';
 
 const levelBadge = { Advanced: 'badge-danger', Intermediate: 'badge-warning', Beginner: 'badge-success' };
 
 const GroupCard = ({ g, onJoin, onLeave, currentUserId }) => {
-  const isMember = (g.members || []).some(m => (m._id || m) === currentUserId);
+  const isMember = (g.members || []).some(m => String(m._id || m) === String(currentUserId));
+  const isCreator = String(g.createdBy?._id || g.createdBy) === String(currentUserId);
+  const isFull = (g.members || []).length >= (g.maxMembers || 10);
   return (
     <div className="group-card">
       <div className="group-card-header">
-        <div className="group-emoji">{g.emoji || '📚'}</div>
+        <div className="group-emoji">{g.avatar || '📚'}</div>
         <div>
           <div className="group-name">{g.name}</div>
           <div className="group-subject">{g.subject}</div>
@@ -29,22 +32,28 @@ const GroupCard = ({ g, onJoin, onLeave, currentUserId }) => {
       <button
         className={`btn ${isMember ? 'btn-ghost' : 'btn-primary'}`}
         style={{ width: '100%', justifyContent: 'center' }}
+        disabled={isCreator || (!isMember && isFull)}
         onClick={() => isMember ? onLeave(g._id) : onJoin(g._id)}
       >
-        {isMember ? '✓ Joined' : '+ Join Group'}
+        {isCreator ? 'Group Creator' : isMember ? '✓ Joined' : isFull ? 'Group Full' : '+ Join Group'}
       </button>
     </div>
   );
 };
 
 const Groups = () => {
+  const [searchParams] = useSearchParams();
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('my');
+  const [activeTab, setActiveTab] = useState(
+    searchParams.has('search') || searchParams.has('level') ? 'all' : 'my'
+  );
   const [showModal, setShowModal] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') || '');
+  const [levelFilter, setLevelFilter] = useState(searchParams.get('level') || '');
   const [newGroup, setNewGroup] = useState({ name: '', subject: '', maxMembers: 10, level: 'Beginner', schedule: '', tags: '' });
   const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
   const currentUser = Session.getUser();
   const currentUserId = currentUser?._id || currentUser?.id;
 
@@ -56,23 +65,34 @@ const Groups = () => {
   const fetchGroups = async () => {
     setLoading(true);
     const res = await GroupsAPI.getAll();
-    if (res.success) setGroups(res.groups || []);
+    if (res.success) {
+      setGroups(res.groups || []);
+      setError('');
+    } else {
+      setError(res.message || 'Could not load study groups.');
+    }
     setLoading(false);
   };
 
   const handleJoin = async (groupId) => {
     const res = await GroupsAPI.join(groupId);
     if (res.success) fetchGroups();
+    else setError(res.message || 'Could not join this group.');
   };
 
   const handleLeave = async (groupId) => {
     const res = await GroupsAPI.leave(groupId);
     if (res.success) fetchGroups();
+    else setError(res.message || 'Could not leave this group.');
   };
 
   const handleCreate = async () => {
-    if (!newGroup.name.trim() || !newGroup.subject.trim()) return;
+    if (!newGroup.name.trim() || !newGroup.subject.trim()) {
+      setError('Group name and subject are required.');
+      return;
+    }
     setCreating(true);
+    setError('');
     const res = await GroupsAPI.create({
       name: newGroup.name,
       subject: newGroup.subject,
@@ -85,16 +105,25 @@ const Groups = () => {
       setShowModal(false);
       setNewGroup({ name: '', subject: '', maxMembers: 10, level: 'Beginner', schedule: '', tags: '' });
       fetchGroups();
+    } else {
+      setError(res.message || 'Could not create this study group.');
     }
     setCreating(false);
   };
 
-  const myGroups = groups.filter(g => (g.members || []).some(m => (m._id || m) === currentUserId));
+  const myGroups = groups.filter(g =>
+    (g.members || []).some(member => String(member._id || member) === String(currentUserId))
+  );
   const allFiltered = search
-    ? groups.filter(g => g.name.toLowerCase().includes(search.toLowerCase()) || g.subject.toLowerCase().includes(search.toLowerCase()))
+    ? groups.filter(g =>
+      g.name.toLowerCase().includes(search.toLowerCase()) ||
+      g.subject.toLowerCase().includes(search.toLowerCase()) ||
+      (g.tags || []).some(tag => tag.toLowerCase().includes(search.toLowerCase()))
+    )
     : groups;
 
-  const displayGroups = activeTab === 'my' ? myGroups : allFiltered;
+  const levelFiltered = levelFilter ? allFiltered.filter(group => group.level === levelFilter) : allFiltered;
+  const displayGroups = activeTab === 'my' ? myGroups : levelFiltered;
 
   return (
     <div className="page-wrapper">
@@ -111,6 +140,7 @@ const Groups = () => {
             </div>
             <button className="btn btn-primary" onClick={() => setShowModal(true)}>➕ Create Group</button>
           </div>
+          {error && <p role="alert" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{error}</p>}
 
           {/* Search */}
           <div className="input-wrapper" style={{ marginBottom: '1.5rem' }}>
@@ -120,6 +150,20 @@ const Groups = () => {
               placeholder="Search groups by name or subject..."
               value={search} onChange={e => setSearch(e.target.value)}
             />
+          </div>
+          <div className="form-group" style={{ maxWidth: '240px', marginBottom: '1.5rem' }}>
+            <label className="form-label" htmlFor="group-level-filter">Study level</label>
+            <select
+              id="group-level-filter"
+              className="form-select"
+              value={levelFilter}
+              onChange={event => setLevelFilter(event.target.value)}
+            >
+              <option value="">Any level</option>
+              <option value="Beginner">Beginner</option>
+              <option value="Intermediate">Intermediate</option>
+              <option value="Advanced">Advanced</option>
+            </select>
           </div>
 
           {/* Tabs */}
@@ -209,4 +253,3 @@ const Groups = () => {
 };
 
 export default Groups;
-

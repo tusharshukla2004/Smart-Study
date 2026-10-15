@@ -36,7 +36,7 @@ const Sidebar = ({ onFindGroup, onAIMatch }) => {
         <span className="icon">🔍</span> Find Group
       </div>
       <div className="sidebar-item" onClick={onAIMatch || (() => {})}>
-        <span className="icon">🤖</span> AI Match Me
+        <span className="icon">🤝</span> Study Partner Matches
       </div>
 
       <div style={{ flex: 1 }}></div>

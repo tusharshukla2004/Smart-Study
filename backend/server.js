@@ -16,6 +16,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 
 // Load environment variables
 dotenv.config();
@@ -23,6 +25,13 @@ dotenv.config();
 const connectDB = require('./config/db');
 const { errorHandler } = require('./middleware/errorHandler');
 const Message = require('./models/Message');
+const StudyGroup = require('./models/StudyGroup');
+const User = require('./models/User');
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://smart-study-8d5g.vercel.app'
+];
 
 // ---- Import Routes ----
 const authRoutes = require('./routes/authRoutes');
@@ -39,18 +48,42 @@ const server = http.createServer(app);
 // ---- Initialize Socket.io ----
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: allowedOrigins,
     methods: ['GET', 'POST']
+  }
+});
+
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) {
+    return next(new Error('Authentication required.'));
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    return next(new Error('Invalid or expired authentication token.'));
+  }
+
+  try {
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return next(new Error('User not found.'));
+    }
+
+    socket.data.user = user;
+    next();
+  } catch (error) {
+    console.error(`❌ Socket authentication lookup failed: ${error.message}`);
+    next(new Error('Authentication could not be verified.'));
   }
 });
 
 // ---- Middleware ----
 // Allow local frontend to access backend
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://smart-study-8d5g.vercel.app"
-  ],
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -96,108 +129,124 @@ app.use(errorHandler);
 // Socket.io - Real-Time Chat System
 // ============================================
 
-// Track connected users
-const connectedUsers = new Map();
-
 io.on('connection', (socket) => {
-  console.log(`🔌 User connected: ${socket.id}`);
+  const user = socket.data.user;
+  console.log(`🔌 Authenticated user connected: ${user.name} (${socket.id})`);
 
-  // ---- User identifies themselves ----
-  socket.on('register', (userData) => {
-    connectedUsers.set(socket.id, {
-      userId: userData.userId,
-      name: userData.name,
-      avatar: userData.avatar
-    });
-    console.log(`👤 User registered: ${userData.name} (${socket.id})`);
+  const getMemberGroup = async (groupId) => {
+    if (!mongoose.Types.ObjectId.isValid(groupId)) return null;
+    const group = await StudyGroup.findById(groupId);
+    if (!group || !group.members.some(member => member.equals(user._id))) return null;
+    return group;
+  };
+
+  const emitToCurrentMembers = async (group, event, payload, excludedSocketId) => {
+    const sockets = await io.in(group._id.toString()).fetchSockets();
+    for (const memberSocket of sockets) {
+      const memberId = memberSocket.data.user?._id;
+      const isMember = memberId && group.members.some(id => id.equals(memberId));
+      if (!isMember) {
+        await memberSocket.leave(group._id.toString());
+      } else if (memberSocket.id !== excludedSocketId) {
+        memberSocket.emit(event, payload);
+      }
+    }
+  };
+
+  socket.on('joinRoom', async (groupId, acknowledge) => {
+    try {
+      const group = await getMemberGroup(groupId);
+      if (!group) {
+        return acknowledge?.({ success: false, message: 'Study group not found or access denied.' });
+      }
+
+      await socket.join(groupId);
+      await emitToCurrentMembers(group, 'userJoined', {
+        userId: user._id,
+        name: user.name,
+        timestamp: new Date()
+      }, socket.id);
+      acknowledge?.({ success: true });
+    } catch (error) {
+      console.error(`❌ Socket room join failed: ${error.message}`);
+      acknowledge?.({ success: false, message: 'Could not join this study group.' });
+    }
   });
 
-  // ---- Join a study group chat room ----
-  socket.on('joinRoom', (groupId) => {
-    socket.join(groupId);
-    const user = connectedUsers.get(socket.id);
-    const userName = user ? user.name : 'A user';
-
-    console.log(`📢 ${userName} joined room: ${groupId}`);
-
-    // Notify others in the room
-    socket.to(groupId).emit('userJoined', {
-      message: `${userName} has joined the chat`,
-      userId: user?.userId,
-      name: userName,
-      timestamp: new Date()
-    });
+  socket.on('leaveRoom', async (groupId) => {
+    if (typeof groupId !== 'string' || !socket.rooms.has(groupId)) return;
+    try {
+      await socket.leave(groupId);
+      const group = await getMemberGroup(groupId);
+      if (group) {
+        await emitToCurrentMembers(group, 'userLeft', {
+          userId: user._id,
+          name: user.name,
+          timestamp: new Date()
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Socket room leave failed: ${error.message}`);
+    }
   });
 
-  // ---- Leave a study group chat room ----
-  socket.on('leaveRoom', (groupId) => {
-    socket.leave(groupId);
-    const user = connectedUsers.get(socket.id);
-    const userName = user ? user.name : 'A user';
-
-    console.log(`👋 ${userName} left room: ${groupId}`);
-
-    socket.to(groupId).emit('userLeft', {
-      message: `${userName} has left the chat`,
-      userId: user?.userId,
-      name: userName,
-      timestamp: new Date()
-    });
-  });
-
-  // ---- Send a message ----
-  socket.on('sendMessage', async (data) => {
-    const { groupId, content } = data;
-    const user = connectedUsers.get(socket.id);
-
-    if (!user || !content || !groupId) return;
+  socket.on('sendMessage', async (data, acknowledge) => {
+    const { groupId, content } = data || {};
+    if (typeof groupId !== 'string' || !socket.rooms.has(groupId)) {
+      return acknowledge?.({ success: false, message: 'Join this study group before sending a message.' });
+    }
+    if (typeof content !== 'string' || !content.trim() || content.trim().length > 2000) {
+      return acknowledge?.({ success: false, message: 'Message must contain 1 to 2000 characters.' });
+    }
 
     try {
-      // Save message to database
+      const group = await getMemberGroup(groupId);
+      if (!group) {
+        await socket.leave(groupId);
+        return acknowledge?.({ success: false, message: 'You are no longer a member of this study group.' });
+      }
+
       const message = await Message.create({
-        senderId: user.userId,
+        senderId: user._id,
         groupId,
         senderName: user.name,
         senderAvatar: user.avatar,
         content: content.trim()
       });
 
-      // Broadcast message to everyone in the room (including sender)
-      io.to(groupId).emit('newMessage', {
+      await emitToCurrentMembers(group, 'newMessage', {
         _id: message._id,
-        senderId: user.userId,
+        senderId: user._id,
         senderName: user.name,
         senderAvatar: user.avatar,
         content: message.content,
         groupId,
         createdAt: message.createdAt
       });
-
+      acknowledge?.({ success: true });
     } catch (error) {
-      console.error('❌ Error saving message:', error.message);
-      socket.emit('messageError', { message: 'Failed to send message.' });
+      console.error(`❌ Error saving socket message: ${error.message}`);
+      acknowledge?.({ success: false, message: 'Failed to send message.' });
     }
   });
 
-  // ---- Typing indicator ----
-  socket.on('typing', (data) => {
-    const user = connectedUsers.get(socket.id);
-    if (user && data.groupId) {
-      socket.to(data.groupId).emit('userTyping', {
-        userId: user.userId,
+  socket.on('typing', async (data) => {
+    const { groupId, isTyping } = data || {};
+    if (typeof groupId !== 'string' || !socket.rooms.has(groupId) || typeof isTyping !== 'boolean') return;
+    try {
+      const group = await getMemberGroup(groupId);
+      if (!group) {
+        await socket.leave(groupId);
+        return;
+      }
+      await emitToCurrentMembers(group, 'userTyping', {
+        userId: user._id,
         name: user.name,
-        isTyping: data.isTyping
-      });
+        isTyping
+      }, socket.id);
+    } catch (error) {
+      console.error(`❌ Socket typing event failed: ${error.message}`);
     }
-  });
-
-  // ---- Disconnect ----
-  socket.on('disconnect', () => {
-    const user = connectedUsers.get(socket.id);
-    if (user) {
-      console.log(`❌ User disconnected: ${user.name} (${socket.id})`);
-    }
-    connectedUsers.delete(socket.id);
   });
 });
 

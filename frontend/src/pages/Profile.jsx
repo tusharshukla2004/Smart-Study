@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
-import { UserAPI, Session } from '../api';
+import { GroupsAPI, TasksAPI, UserAPI, Session } from '../api';
 
 const SUBJECTS = [
   '📐 Mathematics', '⚛️ Physics', '🧪 Chemistry', '🧬 Biology',
@@ -12,23 +12,37 @@ const Profile = () => {
   const [user, setUser] = useState({
     name: '', email: '', university: '', major: '',
     level: '', bio: '', subjects: [],
-    studyHours: 0, groupsJoined: 0, tasksCompleted: 0, streak: 0, avatar: '',
+    groupsJoined: 0, tasksCompleted: 0, avatar: '',
   });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ ...user });
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   // Fetch real profile from MongoDB on load
   useEffect(() => {
     if (!Session.isLoggedIn()) { window.location.href = '/login'; return; }
     const fetchProfile = async () => {
-      const res = await UserAPI.getProfile();
+      const [res, groupsRes, tasksRes] = await Promise.all([
+        UserAPI.getProfile(),
+        GroupsAPI.getAll(),
+        TasksAPI.getAll()
+      ]);
       if (res.success) {
-        setUser(res.user);
-        setDraft(res.user);
-        Session.updateUser(res.user); // keep localStorage in sync as cache
+        const currentUserId = Session.getUser()?._id || Session.getUser()?.id;
+        const groupsJoined = groupsRes.success
+          ? (groupsRes.groups || []).filter(group =>
+            (group.members || []).some(member => String(member._id || member) === String(currentUserId))
+          ).length
+          : 0;
+        const tasksCompleted = tasksRes.success ? tasksRes.stats.completed : 0;
+        const profile = { ...res.user, groupsJoined, tasksCompleted };
+        setUser(profile);
+        setDraft(profile);
+        Session.updateUser(profile);
       } else {
+        setError(res.message || 'Could not load your profile.');
         // fallback to cached localStorage data
         const cached = Session.getUser();
         if (cached) { setUser(prev => ({ ...prev, ...cached })); setDraft(prev => ({ ...prev, ...cached })); }
@@ -40,13 +54,24 @@ const Profile = () => {
 
   // Save profile to MongoDB
   const handleSave = async () => {
-    const res = await UserAPI.updateProfile(draft);
+    setError('');
+    const editableFields = ['name', 'university', 'major', 'level', 'bio', 'subjects', 'availability', 'studyPreferences', 'avatar'];
+    const profileUpdates = Object.fromEntries(editableFields.map(field => [field, draft[field]]));
+    const res = await UserAPI.updateProfile(profileUpdates);
     if (res.success) {
-      setUser(res.user);
-      Session.updateUser(res.user); // update localStorage cache too
+      const profile = {
+        ...res.user,
+        groupsJoined: user.groupsJoined,
+        tasksCompleted: user.tasksCompleted
+      };
+      setUser(profile);
+      setDraft(profile);
+      Session.updateUser(profile);
       setEditing(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+    } else {
+      setError(res.message || 'Could not save your profile.');
     }
   };
 
@@ -69,20 +94,12 @@ const Profile = () => {
               <div className="profile-meta" style={{ marginTop: '2px' }}>{user.level}</div>
               <div className="profile-stats">
                 <div>
-                  <div className="profile-stat-value">{user.studyHours}h</div>
-                  <div className="profile-stat-label">Study Hours</div>
-                </div>
-                <div>
                   <div className="profile-stat-value">{user.groupsJoined}</div>
                   <div className="profile-stat-label">Groups</div>
                 </div>
                 <div>
                   <div className="profile-stat-value">{user.tasksCompleted}</div>
                   <div className="profile-stat-label">Tasks Done</div>
-                </div>
-                <div>
-                  <div className="profile-stat-value">🔥 {user.streak}</div>
-                  <div className="profile-stat-label">Day Streak</div>
                 </div>
               </div>
             </div>
@@ -99,6 +116,7 @@ const Profile = () => {
               <strong>✅ Profile saved!</strong>
             </div>
           )}
+          {error && <div role="alert" className="toast error" style={{ position: 'static', marginBottom: '1rem', animationName: 'none' }}>{error}</div>}
 
           {/* Profile Form */}
           <div className="card">
@@ -116,7 +134,7 @@ const Profile = () => {
                 <input
                   type="email" name="email" className="form-input"
                   value={editing ? draft.email : user.email}
-                  onChange={updateDraft} readOnly={!editing}
+                  readOnly
                 />
               </div>
             </div>

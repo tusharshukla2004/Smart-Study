@@ -29,8 +29,8 @@ const createGroup = asyncHandler(async (req, res) => {
   });
 
   // Populate creator info in the response
-  await group.populate('members', 'name email avatar');
-  await group.populate('createdBy', 'name email avatar');
+  await group.populate('members', 'name avatar');
+  await group.populate('createdBy', 'name avatar');
 
   res.status(201).json({
     success: true,
@@ -60,8 +60,8 @@ const getAllGroups = asyncHandler(async (req, res) => {
   }
 
   const groups = await StudyGroup.find(filter)
-    .populate('members', 'name email avatar')
-    .populate('createdBy', 'name email avatar')
+    .populate('members', 'name avatar')
+    .populate('createdBy', 'name avatar')
     .sort({ createdAt: -1 });
 
   res.status(200).json({
@@ -78,8 +78,8 @@ const getAllGroups = asyncHandler(async (req, res) => {
  */
 const getGroupById = asyncHandler(async (req, res) => {
   const group = await StudyGroup.findById(req.params.groupId)
-    .populate('members', 'name email avatar subjects')
-    .populate('createdBy', 'name email avatar');
+    .populate('members', 'name avatar subjects')
+    .populate('createdBy', 'name avatar');
 
   if (!group) {
     return res.status(404).json({
@@ -110,7 +110,7 @@ const joinGroup = asyncHandler(async (req, res) => {
   }
 
   // Check if user is already a member
-  if (group.members.includes(req.user._id)) {
+  if (group.members.some(memberId => memberId.equals(req.user._id))) {
     return res.status(400).json({
       success: false,
       message: 'You are already a member of this group.'
@@ -130,7 +130,7 @@ const joinGroup = asyncHandler(async (req, res) => {
   await group.save();
 
   // Populate for response
-  await group.populate('members', 'name email avatar');
+  await group.populate('members', 'name avatar');
 
   res.status(200).json({
     success: true,
@@ -155,7 +155,7 @@ const leaveGroup = asyncHandler(async (req, res) => {
   }
 
   // Check if user is a member
-  if (!group.members.includes(req.user._id)) {
+  if (!group.members.some(memberId => memberId.equals(req.user._id))) {
     return res.status(400).json({
       success: false,
       message: 'You are not a member of this group.'
@@ -172,7 +172,7 @@ const leaveGroup = asyncHandler(async (req, res) => {
 
   // Remove user from group
   group.members = group.members.filter(
-    memberId => memberId.toString() !== req.user._id.toString()
+    memberId => !memberId.equals(req.user._id)
   );
   await group.save();
 
@@ -194,8 +194,8 @@ const getRecommendedGroups = asyncHandler(async (req, res) => {
   const groups = await StudyGroup.find({
     members: { $nin: [user._id] }
   })
-    .populate('members', 'name email avatar')
-    .populate('createdBy', 'name email avatar');
+    .populate('members', 'name avatar')
+    .populate('createdBy', 'name avatar');
 
   // Calculate match score for each group based on subject overlap
   const scoredGroups = groups.map(group => {

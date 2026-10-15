@@ -8,9 +8,9 @@ const Footer = () => {
         <div className="footer-grid">
           <div>
             <div className="footer-brand">📚 Smart Study</div>
-            <p className="footer-desc">AI-powered platform connecting students worldwide for smarter, more collaborative learning experiences.</p>
+            <p className="footer-desc">A study platform for finding subject-based partners, collaborating in group chats, and organizing academic tasks.</p>
             <div className="footer-social">
-              <a className="social-btn" href="#" title="Twitter">𝕏</a>S
+              <a className="social-btn" href="#" title="Twitter">𝕏</a>
               <a className="social-btn" href="#" title="LinkedIn">in</a>
               <a className="social-btn" href="#" title="Discord">💬</a>
               <a className="social-btn" href="#" title="Instagram">📸</a>

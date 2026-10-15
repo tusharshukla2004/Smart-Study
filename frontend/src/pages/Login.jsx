@@ -51,12 +51,12 @@ const Login = () => {
         <div className="auth-brand animate-fadeUp">
           <span className="auth-brand-logo">📚 Smart Study</span>
           <h2 className="auth-brand-title">Welcome <span>back!</span><br/>Ready to learn?</h2>
-          <p className="auth-brand-desc">Your study partners are waiting. Log in to continue your academic journey with AI-powered tools and real-time collaboration.</p>
+          <p className="auth-brand-desc">Your study partners are waiting. Log in to find subject-based matches, collaborate in group chats, and organize your study tasks.</p>
           <div className="auth-perks">
-            <div className="auth-perk"><span>🤖</span> AI-matched study partners</div>
-            <div className="auth-perk"><span>💬</span> Real-time group collaboration</div>
-            <div className="auth-perk"><span>🎯</span> Goal tracking & streaks</div>
-            <div className="auth-perk"><span>📊</span> Progress analytics</div>
+            <div className="auth-perk"><span>🤝</span> Subject-based study partner matching</div>
+            <div className="auth-perk"><span>💬</span> Real-time group chat</div>
+            <div className="auth-perk"><span>🎯</span> Task priorities and deadlines</div>
+            <div className="auth-perk"><span>👥</span> Create and join study groups</div>
           </div>
         </div>
 
@@ -88,7 +88,7 @@ const Login = () => {
             <div className={`form-group ${errors.password ? 'has-error' : ''}`}>
               <label className="form-label" htmlFor="login-password">
                 Password
-                <Link to="#" className="forgot-link">Forgot password?</Link>
+                <span className="forgot-link" aria-label="Password reset is not available yet">Password reset unavailable</span>
               </label>
               <div className="input-wrapper">
                 <span className="input-icon">🔒</span>
@@ -101,10 +101,6 @@ const Login = () => {
                 </button>
               </div>
               {errors.password && <div className="form-error">{errors.password}</div>}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.5rem' }}>
-              <input type="checkbox" id="remember-me" style={{ accentColor: 'var(--primary)', width: '16px', height: '16px' }} />
-              <label htmlFor="remember-me" style={{ fontSize: '0.875rem', color: 'var(--text-muted)', cursor: 'pointer' }}>Remember me for 30 days</label>
             </div>
             <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }} disabled={loading}>
               {loading ? '⏳ Signing in...' : 'Sign In →'}
