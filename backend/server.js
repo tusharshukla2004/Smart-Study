@@ -6,18 +6,26 @@
 // - Express REST API with full CRUD operations
 // - JWT Authentication (signup/login + protected routes)
 // - MongoDB via Mongoose ODM
-// - Socket.io for real-time chat
+// - Socket.io for real-time chat & synced study sessions (Pomodoro)
 // - AI Matchmaking (weighted Jaccard similarity)
 // - CORS enabled for frontend integration
+// - Automated reminder jobs (node-cron)
 // ============================================
 
 const express = require('express');
 const http = require('http');
+const path = require('path');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const helmet = require('helmet');
+const compression = require('compression');
+const cookieParser = require('cookie-parser');
+const mongoSanitize = require('express-mongo-sanitize');
+const rateLimit = require('express-rate-limit');
 
 // Load environment variables
 dotenv.config();
@@ -27,6 +35,10 @@ const { errorHandler } = require('./middleware/errorHandler');
 const Message = require('./models/Message');
 const StudyGroup = require('./models/StudyGroup');
 const User = require('./models/User');
+
+const { setSocketIO, createNotification, checkAndSetChatThrottle } = require('./utils/notify');
+const { registerSessionSockets } = require('./sockets/sessionSocket');
+const { startReminderJob } = require('./jobs/reminderJob');
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -40,6 +52,13 @@ const groupRoutes = require('./routes/groupRoutes');
 const taskRoutes = require('./routes/taskRoutes');
 const matchmakingRoutes = require('./routes/matchmakingRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const sessionRoutes = require('./routes/sessionRoutes');
+const { noteRouter } = require('./routes/noteRoutes');
+const { resourceRouter } = require('./routes/resourceRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
+const gamificationRoutes = require('./routes/gamificationRoutes');
+const ratingRoutes = require('./routes/ratingRoutes');
 
 // ---- Initialize Express App ----
 const app = express();
@@ -52,6 +71,9 @@ const io = new Server(server, {
     methods: ['GET', 'POST']
   }
 });
+
+// Register global Socket.io instance for notifications
+setSocketIO(io);
 
 io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
@@ -81,6 +103,39 @@ io.use(async (socket, next) => {
 });
 
 // ---- Middleware ----
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false // Allow inline scripts/styles for React frontend
+}));
+
+// Compression
+app.use(compression());
+
+// Cookie parser (for refresh tokens)
+app.use(cookieParser());
+
+// NoSQL injection sanitization
+app.use(mongoSanitize());
+
+// Request ID middleware
+app.use((req, res, next) => {
+  const reqId = req.headers['x-request-id'] || crypto.randomUUID();
+  req.id = reqId;
+  res.setHeader('X-Request-Id', reqId);
+  next();
+});
+
+// Rate limiting (1000 requests per 15 minutes per IP)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests from this IP, please try again later.' }
+});
+app.use('/api/', apiLimiter);
+
 // Allow local frontend to access backend
 app.use(cors({
   origin: allowedOrigins,
@@ -89,6 +144,34 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ---- Health & Readiness Probes ----
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/api/ready', (req, res) => {
+  const isDbConnected = mongoose.connection.readyState === 1;
+  if (isDbConnected) {
+    return res.status(200).json({
+      status: 'ready',
+      database: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  }
+  return res.status(503).json({
+    status: 'unready',
+    database: 'disconnected',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // ---- API Routes ----
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -96,20 +179,34 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/matchmaking', matchmakingRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/notes', noteRouter);
+app.use('/api/resources', resourceRouter);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/gamification', gamificationRoutes);
+app.use('/api/ratings', ratingRoutes);
 
 // ---- Health Check Route ----
 app.get('/', (req, res) => {
   res.json({
     success: true,
     message: '🎓 Smart Study API is running!',
-    version: '1.0.0',
+    version: '1.2.0',
     endpoints: {
       auth: '/api/auth',
       users: '/api/users',
       groups: '/api/groups',
       tasks: '/api/tasks',
       matchmaking: '/api/matchmaking',
-      chat: '/api/chat'
+      chat: '/api/chat',
+      sessions: '/api/sessions',
+      notes: '/api/notes',
+      resources: '/api/resources',
+      notifications: '/api/notifications',
+      analytics: '/api/analytics',
+      gamification: '/api/gamification',
+      ratings: '/api/ratings'
     }
   });
 });
@@ -126,12 +223,19 @@ app.use('*', (req, res) => {
 app.use(errorHandler);
 
 // ============================================
-// Socket.io - Real-Time Chat System
+// Socket.io - Real-Time Chat & Session Sockets
 // ============================================
+
+// Register session room & Pomodoro timer socket listeners
+registerSessionSockets(io);
 
 io.on('connection', (socket) => {
   const user = socket.data.user;
   console.log(`🔌 Authenticated user connected: ${user.name} (${socket.id})`);
+
+  // Join user's personal notification room: user:<userId>
+  const userPersonalRoom = `user:${user._id.toString()}`;
+  socket.join(userPersonalRoom);
 
   const getMemberGroup = async (groupId) => {
     if (!mongoose.Types.ObjectId.isValid(groupId)) return null;
@@ -223,6 +327,26 @@ io.on('connection', (socket) => {
         groupId,
         createdAt: message.createdAt
       });
+
+      // Dispatch notifications to offline / not-in-room group members with throttling
+      const socketsInRoom = await io.in(groupId).fetchSockets();
+      const userIdsInRoom = new Set(socketsInRoom.map(s => String(s.data.user?._id)));
+
+      for (const memberId of group.members) {
+        const memStr = memberId.toString();
+        if (memStr !== user._id.toString() && !userIdsInRoom.has(memStr)) {
+          if (checkAndSetChatThrottle(memStr, groupId)) {
+            createNotification(memberId, {
+              type: 'new_message',
+              title: `New message in ${group.name}`,
+              message: `${user.name}: ${message.content.slice(0, 80)}`,
+              link: '/chat',
+              data: { groupId, messageId: message._id }
+            });
+          }
+        }
+      }
+
       acknowledge?.({ success: true });
     } catch (error) {
       console.error(`❌ Error saving socket message: ${error.message}`);
@@ -260,6 +384,9 @@ const startServer = async () => {
   // Connect to MongoDB
   await connectDB();
 
+  // Start background reminder job (every minute)
+  startReminderJob();
+
   server.listen(PORT, () => {
     console.log('');
     console.log('============================================');
@@ -272,6 +399,31 @@ const startServer = async () => {
     console.log('============================================');
     console.log('');
   });
+
+  // Graceful shutdown handler
+  const shutdown = async (signal) => {
+    console.log(`\n🛑 Received ${signal}. Initiating graceful shutdown...`);
+    server.close(async () => {
+      console.log('HTTP and Socket server closed.');
+      try {
+        await mongoose.connection.close(false);
+        console.log('MongoDB connection closed.');
+        process.exit(0);
+      } catch (err) {
+        console.error('Error closing MongoDB connection:', err);
+        process.exit(1);
+      }
+    });
+
+    // Force close after 10s if connections remain hanging
+    setTimeout(() => {
+      console.error('Force shutdown after timeout.');
+      process.exit(1);
+    }, 10000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 };
 
 startServer();

@@ -34,17 +34,10 @@ const getProfile = asyncHandler(async (req, res) => {
 const updateProfile = asyncHandler(async (req, res) => {
   // Fields that are allowed to be updated
   const allowedFields = [
-    'name', 'university', 'major', 'level', 'bio',
-    'subjects', 'availability', 'studyPreferences', 'avatar'
+    'name', 'university', 'major', 'level', 'academicLevel', 'bio',
+    'subjects', 'availability', 'studyPreferences', 'avatar',
+    'subjectProfiles', 'availabilitySlots', 'timezone', 'learningGoal', 'studyStyle'
   ];
-
-  // Build update object from allowed fields only
-  const updateData = {};
-  for (const field of allowedFields) {
-    if (req.body[field] !== undefined) {
-      updateData[field] = req.body[field];
-    }
-  }
 
   // Prevent email and password updates through this route
   if (req.body.email || req.body.password) {
@@ -54,20 +47,34 @@ const updateProfile = asyncHandler(async (req, res) => {
     });
   }
 
-  const user = await User.findByIdAndUpdate(
-    req.user._id,
-    updateData,
-    {
-      new: true,           // Return the updated document
-      runValidators: true   // Run schema validators on update
-    }
-  );
+  const user = await User.findById(req.user._id);
 
   if (!user) {
     return res.status(404).json({
       success: false,
       message: 'User not found.'
     });
+  }
+
+  // Update allowed fields
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      if (field === 'level' && typeof req.body.level === 'string' && isNaN(Number(req.body.level))) {
+        user.academicLevel = req.body.level;
+      } else {
+        user[field] = req.body[field];
+      }
+    }
+  }
+
+  await user.save();
+
+  // Invalidate matchmaking cache for current user
+  try {
+    const { matchmakingCache } = require('../services/matchmaking/cache');
+    matchmakingCache.invalidateUser(user._id);
+  } catch {
+    // Non-blocking
   }
 
   res.status(200).json({

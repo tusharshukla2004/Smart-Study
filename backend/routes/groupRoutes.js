@@ -13,6 +13,8 @@ const {
   getRecommendedGroups
 } = require('../controllers/groupController');
 const { protect } = require('../middleware/auth');
+const { createNote, getGroupNotes } = require('./noteRoutes');
+const { createResource, getGroupResources, uploadMiddleware } = require('./resourceRoutes');
 
 // All group routes require authentication
 router.use(protect);
@@ -25,6 +27,14 @@ router.get('/', getAllGroups);
 
 // GET  /api/groups/recommended  — Get AI-recommended groups (must be before /:groupId)
 router.get('/recommended', getRecommendedGroups);
+
+// Notes per group
+router.post('/:groupId/notes', createNote);
+router.get('/:groupId/notes', getGroupNotes);
+
+// Resources per group
+router.post('/:groupId/resources', uploadMiddleware, createResource);
+router.get('/:groupId/resources', getGroupResources);
 
 // GET  /api/groups/:groupId     — Get a single group by ID
 router.get('/:groupId', getGroupById);

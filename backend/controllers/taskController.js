@@ -1,8 +1,12 @@
 // ============================================
-// Task Controller
+// Task Controller (Phase 1 & Phase 2 Gamification)
 // ============================================
 
 const Task = require('../models/Task');
+const User = require('../models/User');
+const { awardXp } = require('./gamificationController');
+const { XP_RULES } = require('../config/gamification');
+const { analyticsCache } = require('../utils/cache');
 const { asyncHandler } = require('../utils/helpers');
 
 /**
@@ -21,6 +25,9 @@ const createTask = asyncHandler(async (req, res) => {
     priority: priority || 'medium',
     deadline: deadline || null
   });
+
+  // Invalidate user analytics cache
+  analyticsCache.invalidateUser(req.user._id);
 
   res.status(201).json({
     success: true,
@@ -68,7 +75,7 @@ const getTasks = asyncHandler(async (req, res) => {
  * @access  Private
  */
 const updateTask = asyncHandler(async (req, res) => {
-  let task = await Task.findById(req.params.id);
+  const task = await Task.findById(req.params.id);
 
   if (!task) {
     return res.status(404).json({
@@ -85,19 +92,32 @@ const updateTask = asyncHandler(async (req, res) => {
     });
   }
 
+  const previousStatus = task.status;
+
   // Update allowed fields
   const allowedFields = ['title', 'description', 'subject', 'status', 'priority', 'deadline'];
-  const updateData = {};
   for (const field of allowedFields) {
     if (req.body[field] !== undefined) {
-      updateData[field] = req.body[field];
+      task[field] = req.body[field];
     }
   }
 
-  task = await Task.findByIdAndUpdate(req.params.id, updateData, {
-    new: true,
-    runValidators: true
-  });
+  await task.save();
+
+  // Phase 2: Award XP if transitioning to completed (idempotent)
+  if (task.status === 'completed' && previousStatus !== 'completed') {
+    const xpPoints = XP_RULES.calculateTaskXp(task.priority);
+    await awardXp(req.user._id, 'task_completed', xpPoints, task._id);
+
+    const completedCount = await Task.countDocuments({
+      userId: req.user._id,
+      status: 'completed'
+    });
+    await User.findByIdAndUpdate(req.user._id, { tasksCompleted: completedCount });
+  }
+
+  // Invalidate user analytics cache
+  analyticsCache.invalidateUser(req.user._id);
 
   res.status(200).json({
     success: true,
@@ -130,6 +150,9 @@ const deleteTask = asyncHandler(async (req, res) => {
   }
 
   await Task.findByIdAndDelete(req.params.id);
+
+  // Invalidate user analytics cache
+  analyticsCache.invalidateUser(req.user._id);
 
   res.status(200).json({
     success: true,

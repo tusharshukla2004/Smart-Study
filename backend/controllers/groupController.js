@@ -5,6 +5,7 @@
 const StudyGroup = require('../models/StudyGroup');
 const User = require('../models/User');
 const { asyncHandler, calculateMatchScore } = require('../utils/helpers');
+const { createNotification } = require('../utils/notify');
 
 /**
  * @desc    Create a new study group
@@ -110,7 +111,7 @@ const joinGroup = asyncHandler(async (req, res) => {
   }
 
   // Check if user is already a member
-  if (group.members.some(memberId => memberId.equals(req.user._id))) {
+  if (group.members.some(memberId => String(memberId) === String(req.user._id))) {
     return res.status(400).json({
       success: false,
       message: 'You are already a member of this group.'
@@ -131,6 +132,17 @@ const joinGroup = asyncHandler(async (req, res) => {
 
   // Populate for response
   await group.populate('members', 'name avatar');
+
+  // Notify group creator if someone else joined
+  if (String(group.createdBy) !== String(req.user._id)) {
+    createNotification(group.createdBy, {
+      type: 'group_join',
+      title: 'New Member Joined Your Group',
+      message: `${req.user.name} joined "${group.name}".`,
+      link: '/groups',
+      data: { groupId: group._id, userId: req.user._id }
+    });
+  }
 
   res.status(200).json({
     success: true,
@@ -155,7 +167,7 @@ const leaveGroup = asyncHandler(async (req, res) => {
   }
 
   // Check if user is a member
-  if (!group.members.some(memberId => memberId.equals(req.user._id))) {
+  if (!group.members.some(memberId => String(memberId) === String(req.user._id))) {
     return res.status(400).json({
       success: false,
       message: 'You are not a member of this group.'
@@ -172,7 +184,7 @@ const leaveGroup = asyncHandler(async (req, res) => {
 
   // Remove user from group
   group.members = group.members.filter(
-    memberId => !memberId.equals(req.user._id)
+    memberId => String(memberId) !== String(req.user._id)
   );
   await group.save();
 

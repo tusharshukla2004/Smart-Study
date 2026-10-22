@@ -52,13 +52,20 @@ const taskSchema = new mongoose.Schema({
   deadline: {
     type: Date,
     default: null
+  },
+
+  // Deadline reminder flag
+  deadlineNotified: {
+    type: Boolean,
+    default: false,
+    index: true
   }
 
 }, {
-  timestamps: true
+  timestamps: true // Adds createdAt and updatedAt automatically
 });
 
-// Index for efficient queries by user
-taskSchema.index({ userId: 1, status: 1 });
+// Phase 2: Compound index for analytics & dashboard queries
+taskSchema.index({ userId: 1, status: 1, deadline: 1 });
 
 module.exports = mongoose.model('Task', taskSchema);
