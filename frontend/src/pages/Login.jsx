@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthAPI, Session } from '../api';
+import { useAppDispatch } from '../hooks/useRedux';
+import { loginUser } from '../store/slices/authSlice';
 import { showToast, validateEmail, validatePassword } from '../utils';
 
 const Login = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -33,13 +35,12 @@ const Login = () => {
 
     setLoading(true);
 
-    const res = await AuthAPI.login(email, password);
-    if (res && res.success) {
-      Session.saveLogin(res.token, res.user);
+    const result = await dispatch(loginUser({ email, password }));
+    if (loginUser.fulfilled.match(result)) {
       showToast('Welcome back! Redirecting...', 'success');
       setTimeout(() => navigate('/dashboard'), 1000);
     } else {
-      showToast(res?.message || 'Login failed. Please check your credentials.', 'error');
+      showToast(result.payload || 'Login failed. Please check your credentials.', 'error');
     }
     setLoading(false);
   };

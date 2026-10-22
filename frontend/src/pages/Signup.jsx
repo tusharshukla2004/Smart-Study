@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthAPI } from '../api';
+import { useAppDispatch } from '../hooks/useRedux';
+import { signupUser } from '../store/slices/authSlice';
 import { showToast, validateEmail, validatePassword } from '../utils';
 
 const SUBJECTS = [
@@ -20,6 +21,7 @@ const SUBJECTS = [
 
 const Signup = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -116,14 +118,12 @@ const Signup = () => {
     };
 
     try {
-      const res = await AuthAPI.signup(apiData);
-      if (res?.success) {
-        localStorage.setItem('ss_token', res.token);
-        localStorage.setItem('ss_user', JSON.stringify(res.user));
+      const result = await dispatch(signupUser(apiData));
+      if (signupUser.fulfilled.match(result)) {
         showToast('Account created! Welcome to Smart Study 🎉', 'success');
         setTimeout(() => navigate('/dashboard'), 1200);
       } else {
-        showToast(res?.message || 'Signup failed. Please try again.', 'error');
+        showToast(result.payload || 'Signup failed. Please try again.', 'error');
       }
     } finally {
       setLoading(false);

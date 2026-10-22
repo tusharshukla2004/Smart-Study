@@ -1,13 +1,15 @@
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useAppDispatch } from '../hooks/useRedux';
+import { logout } from '../store/slices/authSlice';
 
 const Sidebar = ({ onFindGroup, onAIMatch }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
 
   const handleLogout = () => {
-    localStorage.removeItem('ss_token');
-    localStorage.removeItem('ss_user');
+    dispatch(logout());
     navigate('/login');
   };
 
@@ -26,6 +28,12 @@ const Sidebar = ({ onFindGroup, onAIMatch }) => {
       </Link>
       <Link to="/tasks" className={`sidebar-item ${isActive('/tasks')}`}>
         <span className="icon">✅</span> Tasks & Goals
+      </Link>
+      <Link to="/analytics" className={`sidebar-item ${isActive('/analytics')}`}>
+        <span className="icon">📈</span> Analytics
+      </Link>
+      <Link to="/matches" className={`sidebar-item ${isActive('/matches')}`}>
+        <span className="icon">🤝</span> Matchmaking Hub
       </Link>
       <Link to="/profile" className={`sidebar-item ${isActive('/profile')}`}>
         <span className="icon">👤</span> Profile

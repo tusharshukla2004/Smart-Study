@@ -3,15 +3,21 @@
    Connects the frontend to the Express backend.
    ============================================ */
 
-const API_BASE = `${import.meta.env.VITE_API_URL}/api`;
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api`;
+
 // ---- Core fetch wrapper ----
 async function api(method, path, body = null) {
   const token = localStorage.getItem('ss_token');
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = {};
+  if (!(body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (token) headers['Authorization'] = 'Bearer ' + token;
 
   const opts = { method, headers };
-  if (body) opts.body = JSON.stringify(body);
+  if (body) {
+    opts.body = body instanceof FormData ? body : JSON.stringify(body);
+  }
 
   try {
     const res = await fetch(API_BASE + path, opts);
@@ -68,13 +74,100 @@ const TasksAPI = {
 
 // ---- Matchmaking API ----
 const MatchAPI = {
-  getMatches: () => api('GET', '/matchmaking')
+  getMatches: () => api('GET', '/matchmaking'),
+  // v2 Matchmaking endpoints
+  getPartnersV2: (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return api('GET', `/matchmaking/v2/partners${q ? '?' + q : ''}`);
+  },
+  getGroupsV2: (limit = 5) => api('GET', `/matchmaking/v2/groups?limit=${limit}`),
+  connect: (userId) => api('POST', `/matchmaking/v2/connect/${userId}`),
+  respond: (userId, accept) => api('POST', `/matchmaking/v2/respond/${userId}`, { accept }),
+  dismiss: (userId) => api('POST', `/matchmaking/v2/dismiss/${userId}`),
+  getRequests: () => api('GET', '/matchmaking/v2/requests')
 };
 
 // ---- Chat API ----
 const ChatAPI = {
   getHistory: (groupId, limit = 50) => api('GET', '/chat/' + groupId + '?limit=' + limit),
   sendMessage: (groupId, content) => api('POST', '/chat/' + groupId, { content })
+};
+
+// ---- Study Sessions API (Pomodoro) ----
+const SessionAPI = {
+  create: (data) => api('POST', '/sessions', data),
+  getAll: (params = '') => api('GET', '/sessions' + (params ? '?' + params : '')),
+  getUpcoming: () => api('GET', '/sessions/upcoming'),
+  getById: (id) => api('GET', `/sessions/${id}`),
+  update: (id, data) => api('PUT', `/sessions/${id}`, data),
+  cancel: (id) => api('DELETE', `/sessions/${id}`),
+  rsvp: (id, status) => api('POST', `/sessions/${id}/rsvp`, { status }),
+  submitLog: (id, logData) => api('POST', `/sessions/${id}/log`, logData),
+  getMyLogs: (page = 1) => api('GET', `/sessions/logs/me?page=${page}`),
+  getIcsDownloadUrl: (id) => `${API_BASE}/sessions/${id}/ics`
+};
+
+// ---- Notes API (Markdown) ----
+const NotesAPI = {
+  getByGroup: (groupId, search = '', tag = '') => {
+    const params = new URLSearchParams();
+    if (search) params.append('search', search);
+    if (tag) params.append('tag', tag);
+    const qs = params.toString();
+    return api('GET', `/groups/${groupId}/notes${qs ? `?${qs}` : ''}`);
+  },
+  getById: (id) => api('GET', `/notes/${id}`),
+  create: (groupId, data) => api('POST', `/groups/${groupId}/notes`, data),
+  update: (id, data) => api('PUT', `/notes/${id}`, data),
+  delete: (id) => api('DELETE', `/notes/${id}`),
+  togglePin: (id) => api('PATCH', `/notes/${id}/pin`)
+};
+
+// ---- Resources API (Links & File Uploads) ----
+const ResourcesAPI = {
+  getByGroup: (groupId) => api('GET', `/groups/${groupId}/resources`),
+  create: (groupId, formDataOrJson) => api('POST', `/groups/${groupId}/resources`, formDataOrJson),
+  delete: (id) => api('DELETE', `/resources/${id}`)
+};
+
+// ---- Notifications API ----
+const NotificationAPI = {
+  getAll: (unread = false, page = 1) => api('GET', `/notifications?unread=${unread}&page=${page}`),
+  getUnreadCount: () => api('GET', '/notifications/unread-count'),
+  markAsRead: (id) => api('PATCH', `/notifications/${id}/read`),
+  markAllAsRead: () => api('PATCH', '/notifications/read-all'),
+  delete: (id) => api('DELETE', `/notifications/${id}`)
+};
+
+// ---- Analytics API (Phase 2 Feature A) ----
+const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+
+const AnalyticsAPI = {
+  getOverview: (range = '7d', tz = userTz) => api('GET', `/analytics/overview?range=${range}&tz=${encodeURIComponent(tz)}`),
+  getStudyTime: (range = '7d', groupBy = 'day', tz = userTz) => api('GET', `/analytics/study-time?range=${range}&groupBy=${groupBy}&tz=${encodeURIComponent(tz)}`),
+  getSubjects: (range = '30d', tz = userTz) => api('GET', `/analytics/subjects?range=${range}&tz=${encodeURIComponent(tz)}`),
+  getHeatmap: (year = new Date().getFullYear(), tz = userTz) => api('GET', `/analytics/heatmap?year=${year}&tz=${encodeURIComponent(tz)}`),
+  getFocusTrend: (range = '30d', tz = userTz) => api('GET', `/analytics/focus-trend?range=${range}&tz=${encodeURIComponent(tz)}`),
+  getTasks: (range = '30d') => api('GET', `/analytics/tasks?range=${range}`),
+  getGroupAnalytics: (groupId) => api('GET', `/analytics/groups/${groupId}`)
+};
+
+// ---- Gamification API (Phase 2 Feature B) ----
+const GamificationAPI = {
+  getMe: () => api('GET', '/gamification/me'),
+  getLeaderboard: (scope = 'global', groupId = '', period = 'week', page = 1) => {
+    const params = new URLSearchParams({ scope, period, page });
+    if (groupId) params.append('groupId', groupId);
+    return api('GET', `/gamification/leaderboard?${params.toString()}`);
+  },
+  updateOptIn: (optIn) => api('PATCH', '/users/leaderboard-opt', { optIn })
+};
+
+// ---- Peer Rating API (Phase 2 Feature C) ----
+const RatingAPI = {
+  getRateable: (sessionId) => api('GET', `/sessions/${sessionId}/rateable`),
+  submitRatings: (sessionId, ratings) => api('POST', `/sessions/${sessionId}/ratings`, { ratings }),
+  getReputation: (userId) => api('GET', `/users/${userId}/reputation`)
 };
 
 // ---- Session helpers (replaces old SS object for auth) ----
@@ -108,4 +201,19 @@ const Session = {
   }
 };
 
-export { AuthAPI, UserAPI, GroupsAPI, TasksAPI, MatchAPI, ChatAPI, Session };
+export {
+  AuthAPI,
+  UserAPI,
+  GroupsAPI,
+  TasksAPI,
+  MatchAPI,
+  ChatAPI,
+  SessionAPI,
+  NotesAPI,
+  ResourcesAPI,
+  NotificationAPI,
+  AnalyticsAPI,
+  GamificationAPI,
+  RatingAPI,
+  Session
+};

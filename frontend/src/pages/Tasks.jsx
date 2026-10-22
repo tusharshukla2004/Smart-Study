@@ -1,65 +1,53 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../components/Sidebar';
-import { TasksAPI, Session } from '../api';
+import { Session } from '../api';
+import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
+import { fetchTasks, createTask, updateTask, deleteTask } from '../store/slices/tasksSlice';
 
 const priorityBadge = { high: 'badge-danger', medium: 'badge-warning', low: 'badge-primary' };
 
 const Tasks = () => {
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const dispatch = useAppDispatch();
+  const { items: tasks, loading } = useAppSelector((state) => state.tasks);
+
   const [showModal, setShowModal] = useState(false);
   const [newTask, setNewTask] = useState({ title: '', subject: '', priority: 'medium', deadline: '' });
   const [activeTab, setActiveTab] = useState('all');
   const [error, setError] = useState('');
 
-  // Fetch tasks from MongoDB on load
+  // Fetch tasks on load
   useEffect(() => {
     if (!Session.isLoggedIn()) { window.location.href = '/login'; return; }
-    fetchTasks();
-  }, []);
+    dispatch(fetchTasks());
+  }, [dispatch]);
 
-  const fetchTasks = async () => {
-    setLoading(true);
-    const res = await TasksAPI.getAll();
-    if (res.success) {
-      setTasks(res.tasks);
-    }
-    setLoading(false);
-  };
-
-  // Toggle task done/pending in MongoDB
+  // Toggle task done/pending
   const toggleDone = async (task) => {
     const newStatus = task.status === 'completed' ? 'pending' : 'completed';
-    const res = await TasksAPI.update(task._id, { status: newStatus });
-    if (res.success) {
-      setTasks(prev => prev.map(t => t._id === task._id ? res.task : t));
-    }
+    dispatch(updateTask({ id: task._id, data: { status: newStatus } }));
   };
 
-  // Delete task from MongoDB
-  const deleteTask = async (id) => {
-    const res = await TasksAPI.delete(id);
-    if (res.success) {
-      setTasks(prev => prev.filter(t => t._id !== id));
-    }
+  // Delete task
+  const handleDeleteTask = (id) => {
+    dispatch(deleteTask(id));
   };
 
-  // Add new task to MongoDB
+  // Add new task
   const addTask = async () => {
     if (!newTask.title.trim()) return;
     setError('');
-    const res = await TasksAPI.create({
+    const result = await dispatch(createTask({
       title: newTask.title,
       subject: newTask.subject,
       priority: newTask.priority,
       deadline: newTask.deadline || undefined
-    });
-    if (res.success) {
-      setTasks(prev => [...prev, res.task]);
+    }));
+
+    if (createTask.fulfilled.match(result)) {
       setNewTask({ title: '', subject: '', priority: 'medium', deadline: '' });
       setShowModal(false);
     } else {
-      setError(res.message || 'Failed to add task.');
+      setError(result.payload || 'Failed to add task.');
     }
   };
 
@@ -115,7 +103,7 @@ const Tasks = () => {
 
           {/* Task List */}
           <div className="card">
-            {loading ? (
+            {loading && tasks.length === 0 ? (
               <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem 0' }}>⏳ Loading tasks...</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -140,7 +128,7 @@ const Tasks = () => {
                     </div>
                     <span className={`badge ${priorityBadge[t.priority] || 'badge-primary'}`}>{t.priority}</span>
                     <button
-                      onClick={() => deleteTask(t._id)}
+                      onClick={() => handleDeleteTask(t._id)}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-dim)', fontSize: '1rem', marginLeft: '8px' }}
                       title="Delete task"
                     >🗑️</button>

@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import { UserAPI, GroupsAPI, TasksAPI, MatchAPI, Session } from '../api';
+import UpcomingSessionsWidget from '../components/UpcomingSessionsWidget';
+import StudyTimeBarChart from '../components/analytics/StudyTimeBarChart';
+import LeaderboardTab from '../components/gamification/LeaderboardTab';
+import { UserAPI, GroupsAPI, TasksAPI, MatchAPI, AnalyticsAPI, Session } from '../api';
+import { useAppDispatch } from '../hooks/useRedux';
+import { setUser as setReduxUser } from '../store/slices/authSlice';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const [user, setUser] = useState({ name: '', avatar: '', subjects: [] });
   const [groups, setGroups] = useState([]);
   const [groupsJoined, setGroupsJoined] = useState(0);
@@ -17,6 +23,7 @@ const Dashboard = () => {
   const [findSubject, setFindSubject] = useState('');
   const [findLevel, setFindLevel] = useState('');
   const [loading, setLoading] = useState(true);
+  const [studyTimeSeries, setStudyTimeSeries] = useState([]);
 
   useEffect(() => {
     if (!Session.isLoggedIn()) { navigate('/login'); return; }
@@ -25,17 +32,19 @@ const Dashboard = () => {
 
     // Fetch all real data from MongoDB
     const loadData = async () => {
-      const [profileRes, groupsRes, tasksRes, matchRes] = await Promise.all([
+      const [profileRes, groupsRes, tasksRes, matchRes, studyTimeRes] = await Promise.all([
         UserAPI.getProfile(),
         GroupsAPI.getAll(),
         TasksAPI.getAll(),
-        MatchAPI.getMatches()
+        MatchAPI.getMatches(),
+        AnalyticsAPI.getStudyTime('7d', 'day')
       ]);
       const currentUserId = Session.getUser()?._id || Session.getUser()?.id;
 
       if (profileRes.success) {
         setUser(profileRes.user);
         Session.updateUser(profileRes.user);
+        dispatch(setReduxUser(profileRes.user));
       }
       if (groupsRes.success) {
         setGroupsJoined((groupsRes.groups || []).filter(group =>
@@ -50,10 +59,13 @@ const Dashboard = () => {
         setGroups((matchRes.data?.matchedGroups || []).slice(0, 3));
         setMatches((matchRes.data?.matchedUsers || []).slice(0, 3));
       }
+      if (studyTimeRes.success) {
+        setStudyTimeSeries(studyTimeRes.series || []);
+      }
       setLoading(false);
     };
     loadData();
-  }, []);
+  }, [dispatch, navigate]);
 
   const pendingTasks = taskStats.total - taskStats.completed;
   const taskProgress = taskStats.total ? Math.round((taskStats.completed / taskStats.total) * 100) : 0;
@@ -72,44 +84,47 @@ const Dashboard = () => {
             <div className="welcome-text">
               <div className="welcome-greeting">{greeting}</div>
               <div className="welcome-name">Welcome back, {user.name ? user.name.split(' ')[0] : 'Student'}!</div>
-              <div className="welcome-streak">{user.subjects?.length || 0} study subjects in your profile</div>
+              <div className="welcome-streak">🔥 Streak: {user.streak || 0} days · ⏱️ {user.studyHours || 0}h studied</div>
             </div>
             <div className="welcome-emoji">📚</div>
           </div>
 
-          {/* Stats */}
+          {/* Stats Grid */}
           <div className="stats-grid animate-fadeUp delay-1">
             <div className="stat-card">
               <div className="stat-icon purple">⏱️</div>
+              <div className="stat-info">
+                <div className="stat-value">{user.studyHours || 0}h</div>
+                <div className="stat-label">Total Study Time</div>
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon cyan">👥</div>
               <div className="stat-info">
                 <div className="stat-value">{groupsJoined}</div>
                 <div className="stat-label">Groups Joined</div>
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-icon cyan">👥</div>
-              <div className="stat-info">
-                <div className="stat-value">{pendingTasks}</div>
-                <div className="stat-label">Tasks Remaining</div>
-              </div>
-            </div>
-            <div className="stat-card">
               <div className="stat-icon green">✅</div>
-              <div className="stat-info">
-                <div className="stat-value">{matches.length}</div>
-                <div className="stat-label">Top Study Matches</div>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon amber">🔥</div>
               <div className="stat-info">
                 <div className="stat-value">{taskStats.completed}</div>
                 <div className="stat-label">Tasks Completed</div>
               </div>
             </div>
+            <div className="stat-card">
+              <div className="stat-icon amber">🔥</div>
+              <div className="stat-info">
+                <div className="stat-value">{user.streak || 0}</div>
+                <div className="stat-label">Day Streak</div>
+              </div>
+            </div>
           </div>
 
-          {/* Recommended Groups + Sidebar panels */}
+          {/* Feature A: Upcoming Study Sessions Widget */}
+          <UpcomingSessionsWidget />
+
+          {/* Recommended Groups + Task Progress */}
           <div className="three-col">
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -157,7 +172,7 @@ const Dashboard = () => {
                     <div className="progress-fill" style={{ width: `${taskProgress}%` }}></div>
                   </div>
                   <p style={{ color: 'var(--text-muted)', marginTop: '1rem', fontSize: '0.85rem' }}>
-                    {user.subjects?.length ? `Studying: ${user.subjects.join(', ')}` : 'Add subjects to your profile to improve your matches.'}
+                    {pendingTasks} remaining tasks · <Link to="/tasks">Manage Tasks</Link>
                   </p>
                 </div>
               </div>
@@ -169,7 +184,7 @@ const Dashboard = () => {
                   <div className="activity-list">
                     {recentTasks.length ? recentTasks.map(task => (
                       <div key={task._id} className="activity-item">
-                        <div className="activity-icon" style={{ background: 'rgba(108,99,255,0.15)' }}>
+                        <div className="activity-icon" style={{ background: 'rgba(6,182,212,0.15)' }}>
                           {task.status === 'completed' ? '✅' : '🎯'}
                         </div>
                         <div className="activity-text">
@@ -185,6 +200,30 @@ const Dashboard = () => {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Phase 2: Compact Analytics & Global Leaderboard */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px', marginTop: '24px' }}>
+            {/* Compact Study Time Bar Chart */}
+            <div className="card">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text)' }}>
+                    📈 7-Day Study Velocity
+                  </h3>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Recent daily minutes studied
+                  </div>
+                </div>
+                <Link to="/analytics" className="btn btn-ghost btn-sm">
+                  Full Analytics →
+                </Link>
+              </div>
+              <StudyTimeBarChart data={studyTimeSeries} groupBy="day" />
+            </div>
+
+            {/* Global Leaderboard Preview */}
+            <LeaderboardTab defaultScope="global" showScopeSwitch={false} />
           </div>
         </main>
       </div>
@@ -265,6 +304,18 @@ const Dashboard = () => {
                 </div>
               </div>
             ))}
+            <div style={{ marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '12px', textAlign: 'center' }}>
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center' }}
+                onClick={() => {
+                  setShowAIModal(false);
+                  navigate('/matches');
+                }}
+              >
+                Open Full Matchmaking Hub →
+              </button>
+            </div>
           </div>
         </div>
       )}

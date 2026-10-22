@@ -1,17 +1,28 @@
+// ============================================
+// Groups Page with Sessions, Notes & Resources Tabs
+// ============================================
+
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import { GroupsAPI, Session } from '../api';
+import GroupSessionsTab from '../components/GroupSessionsTab';
+import GroupNotesTab from '../components/GroupNotesTab';
+import GroupResourcesTab from '../components/GroupResourcesTab';
+import LeaderboardTab from '../components/gamification/LeaderboardTab';
+import { Session } from '../api';
+import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
+import { fetchGroups, joinGroup, leaveGroup, createGroup } from '../store/slices/groupsSlice';
 
 const levelBadge = { Advanced: 'badge-danger', Intermediate: 'badge-warning', Beginner: 'badge-success' };
 
-const GroupCard = ({ g, onJoin, onLeave, currentUserId }) => {
+const GroupCard = ({ g, onJoin, onLeave, onView, currentUserId }) => {
   const isMember = (g.members || []).some(m => String(m._id || m) === String(currentUserId));
   const isCreator = String(g.createdBy?._id || g.createdBy) === String(currentUserId);
   const isFull = (g.members || []).length >= (g.maxMembers || 10);
+
   return (
-    <div className="group-card">
-      <div className="group-card-header">
+    <div className="group-card" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div className="group-card-header" style={{ cursor: isMember ? 'pointer' : 'default' }} onClick={() => isMember && onView(g)}>
         <div className="group-emoji">{g.avatar || '📚'}</div>
         <div>
           <div className="group-name">{g.name}</div>
@@ -29,61 +40,74 @@ const GroupCard = ({ g, onJoin, onLeave, currentUserId }) => {
         <span className="match-dot"></span>
         <span className={`badge ${levelBadge[g.level] || 'badge-primary'}`} style={{ marginLeft: 'auto' }}>{g.level || 'Open'}</span>
       </div>
-      <button
-        className={`btn ${isMember ? 'btn-ghost' : 'btn-primary'}`}
-        style={{ width: '100%', justifyContent: 'center' }}
-        disabled={isCreator || (!isMember && isFull)}
-        onClick={() => isMember ? onLeave(g._id) : onJoin(g._id)}
-      >
-        {isCreator ? 'Group Creator' : isMember ? '✓ Joined' : isFull ? 'Group Full' : '+ Join Group'}
-      </button>
+
+      <div style={{ marginTop: 'auto', display: 'flex', gap: '8px' }}>
+        {isMember && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ flex: 1, justifyContent: 'center' }}
+            onClick={() => onView(g)}
+          >
+            📂 Open Hub
+          </button>
+        )}
+        <button
+          type="button"
+          className={`btn btn-sm ${isMember ? 'btn-ghost' : 'btn-primary'}`}
+          style={{ flex: isMember ? 1 : 2, justifyContent: 'center' }}
+          disabled={isCreator || (!isMember && isFull)}
+          onClick={() => isMember ? onLeave(g._id) : onJoin(g._id)}
+        >
+          {isCreator ? 'Group Creator' : isMember ? 'Leave' : isFull ? 'Group Full' : '+ Join Group'}
+        </button>
+      </div>
     </div>
   );
 };
 
 const Groups = () => {
   const [searchParams] = useSearchParams();
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const dispatch = useAppDispatch();
+  const { items: groups, loading } = useAppSelector((state) => state.groups);
+  const authUser = useAppSelector((state) => state.auth.user);
+
   const [activeTab, setActiveTab] = useState(
     searchParams.has('search') || searchParams.has('level') ? 'all' : 'my'
   );
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupSubTab, setGroupSubTab] = useState('sessions'); // 'sessions' | 'notes' | 'resources'
+
   const [showModal, setShowModal] = useState(false);
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [levelFilter, setLevelFilter] = useState(searchParams.get('level') || '');
   const [newGroup, setNewGroup] = useState({ name: '', subject: '', maxMembers: 10, level: 'Beginner', schedule: '', tags: '' });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
-  const currentUser = Session.getUser();
+
+  const currentUser = authUser || Session.getUser();
   const currentUserId = currentUser?._id || currentUser?.id;
 
   useEffect(() => {
     if (!Session.isLoggedIn()) { window.location.href = '/login'; return; }
-    fetchGroups();
-  }, []);
-
-  const fetchGroups = async () => {
-    setLoading(true);
-    const res = await GroupsAPI.getAll();
-    if (res.success) {
-      setGroups(res.groups || []);
-      setError('');
-    } else {
-      setError(res.message || 'Could not load study groups.');
-    }
-    setLoading(false);
-  };
+    dispatch(fetchGroups());
+  }, [dispatch]);
 
   const handleJoin = async (groupId) => {
-    const res = await GroupsAPI.join(groupId);
-    if (res.success) fetchGroups();
-    else setError(res.message || 'Could not join this group.');
+    const result = await dispatch(joinGroup(groupId));
+    if (joinGroup.rejected.match(result)) {
+      setError(result.payload || 'Could not join this group.');
+    }
   };
 
   const handleLeave = async (groupId) => {
-    const res = await GroupsAPI.leave(groupId);
-    if (res.success) fetchGroups();
-    else setError(res.message || 'Could not leave this group.');
+    const result = await dispatch(leaveGroup(groupId));
+    if (leaveGroup.rejected.match(result)) {
+      setError(result.payload || 'Could not leave this group.');
+    } else if (selectedGroup?._id === groupId) {
+      setSelectedGroup(null);
+    }
   };
 
   const handleCreate = async () => {
@@ -93,20 +117,22 @@ const Groups = () => {
     }
     setCreating(true);
     setError('');
-    const res = await GroupsAPI.create({
+
+    const groupPayload = {
       name: newGroup.name,
       subject: newGroup.subject,
       maxMembers: parseInt(newGroup.maxMembers) || 10,
       level: newGroup.level,
       schedule: newGroup.schedule,
       tags: newGroup.tags.split(',').map(t => t.trim()).filter(Boolean)
-    });
-    if (res.success) {
+    };
+
+    const result = await dispatch(createGroup(groupPayload));
+    if (createGroup.fulfilled.match(result)) {
       setShowModal(false);
       setNewGroup({ name: '', subject: '', maxMembers: 10, level: 'Beginner', schedule: '', tags: '' });
-      fetchGroups();
     } else {
-      setError(res.message || 'Could not create this study group.');
+      setError(result.payload || 'Could not create this study group.');
     }
     setCreating(false);
   };
@@ -114,6 +140,7 @@ const Groups = () => {
   const myGroups = groups.filter(g =>
     (g.members || []).some(member => String(member._id || member) === String(currentUserId))
   );
+
   const allFiltered = search
     ? groups.filter(g =>
       g.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -130,71 +157,152 @@ const Groups = () => {
       <div className="app-layout">
         <Sidebar />
         <main className="main-content">
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-            <div>
-              <h1 className="section-title" style={{ fontSize: '1.8rem' }}>Study <span>Groups</span></h1>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '4px' }}>
-                Find and join groups that match your subjects and schedule
-              </p>
-            </div>
-            <button className="btn btn-primary" onClick={() => setShowModal(true)}>➕ Create Group</button>
-          </div>
-          {error && <p role="alert" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{error}</p>}
+          {/* Detail View for Selected Group */}
+          {selectedGroup ? (
+            <div className="animate-fadeUp">
+              {/* Back to list & Group Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setSelectedGroup(null)}
+                >
+                  ← Back to Groups
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '1.8rem' }}>{selectedGroup.avatar || '📚'}</span>
+                  <div>
+                    <h1 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0, color: 'var(--text)' }}>
+                      {selectedGroup.name}
+                    </h1>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      {selectedGroup.subject} · {selectedGroup.level || 'Open Level'} · {(selectedGroup.members || []).length} members
+                    </div>
+                  </div>
+                </div>
 
-          {/* Search */}
-          <div className="input-wrapper" style={{ marginBottom: '1.5rem' }}>
-            <span className="input-icon">🔍</span>
-            <input
-              type="text" className="form-input"
-              placeholder="Search groups by name or subject..."
-              value={search} onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="form-group" style={{ maxWidth: '240px', marginBottom: '1.5rem' }}>
-            <label className="form-label" htmlFor="group-level-filter">Study level</label>
-            <select
-              id="group-level-filter"
-              className="form-select"
-              value={levelFilter}
-              onChange={event => setLevelFilter(event.target.value)}
-            >
-              <option value="">Any level</option>
-              <option value="Beginner">Beginner</option>
-              <option value="Intermediate">Intermediate</option>
-              <option value="Advanced">Advanced</option>
-            </select>
-          </div>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => navigate('/chat')}
+                  >
+                    💬 Open Chat
+                  </button>
+                </div>
+              </div>
 
-          {/* Tabs */}
-          <div className="tabs">
-            <button className={`tab-btn ${activeTab === 'my' ? 'active' : ''}`} onClick={() => setActiveTab('my')}>
-              My Groups ({myGroups.length})
-            </button>
-            <button className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
-              All Groups ({groups.length})
-            </button>
-          </div>
+              {/* Group Workspace Tabs */}
+              <div className="tabs" style={{ marginBottom: '1.5rem' }}>
+                <button
+                  className={`tab-btn ${groupSubTab === 'sessions' ? 'active' : ''}`}
+                  onClick={() => setGroupSubTab('sessions')}
+                >
+                  ⏱️ Study Sessions
+                </button>
+                <button
+                  className={`tab-btn ${groupSubTab === 'notes' ? 'active' : ''}`}
+                  onClick={() => setGroupSubTab('notes')}
+                >
+                  📝 Shared Notes
+                </button>
+                <button
+                  className={`tab-btn ${groupSubTab === 'resources' ? 'active' : ''}`}
+                  onClick={() => setGroupSubTab('resources')}
+                >
+                  📁 Files &amp; Resources
+                </button>
+                <button
+                  className={`tab-btn ${groupSubTab === 'leaderboard' ? 'active' : ''}`}
+                  onClick={() => setGroupSubTab('leaderboard')}
+                >
+                  🏆 Leaderboard
+                </button>
+              </div>
 
-          {/* Groups Grid */}
-          {loading ? (
-            <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '3rem 0' }}>⏳ Loading groups...</p>
-          ) : displayGroups.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>👥</div>
-              <p style={{ color: 'var(--text-muted)' }}>
-                {activeTab === 'my' ? "You haven't joined any groups yet." : "No groups found."}
-              </p>
-              <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setActiveTab('all')}>
-                Browse All Groups
-              </button>
+              {/* Tab Contents */}
+              {groupSubTab === 'sessions' && <GroupSessionsTab group={selectedGroup} />}
+              {groupSubTab === 'notes' && <GroupNotesTab group={selectedGroup} />}
+              {groupSubTab === 'resources' && <GroupResourcesTab group={selectedGroup} />}
+              {groupSubTab === 'leaderboard' && <LeaderboardTab defaultScope="group" groupId={selectedGroup._id} showScopeSwitch={true} />}
             </div>
           ) : (
-            <div className="groups-page-grid">
-              {displayGroups.map(g => (
-                <GroupCard key={g._id} g={g} onJoin={handleJoin} onLeave={handleLeave} currentUserId={currentUserId} />
-              ))}
-            </div>
+            /* Groups Overview List */
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
+                <div>
+                  <h1 className="section-title" style={{ fontSize: '1.8rem' }}>Study <span>Groups</span></h1>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '4px' }}>
+                    Find and join groups that match your subjects and schedule
+                  </p>
+                </div>
+                <button className="btn btn-primary" onClick={() => setShowModal(true)}>➕ Create Group</button>
+              </div>
+              {error && <p role="alert" style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{error}</p>}
+
+              {/* Search & Level Filter */}
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <div className="input-wrapper" style={{ flex: 1, minWidth: '240px' }}>
+                  <span className="input-icon">🔍</span>
+                  <input
+                    type="text" className="form-input"
+                    placeholder="Search groups by name or subject..."
+                    value={search} onChange={e => setSearch(e.target.value)}
+                  />
+                </div>
+                <div className="form-group" style={{ minWidth: '180px', margin: 0 }}>
+                  <select
+                    id="group-level-filter"
+                    className="form-select"
+                    value={levelFilter}
+                    onChange={event => setLevelFilter(event.target.value)}
+                  >
+                    <option value="">Any level</option>
+                    <option value="Beginner">Beginner</option>
+                    <option value="Intermediate">Intermediate</option>
+                    <option value="Advanced">Advanced</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="tabs">
+                <button className={`tab-btn ${activeTab === 'my' ? 'active' : ''}`} onClick={() => setActiveTab('my')}>
+                  My Groups ({myGroups.length})
+                </button>
+                <button className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>
+                  All Groups ({groups.length})
+                </button>
+              </div>
+
+              {/* Groups Grid */}
+              {loading && groups.length === 0 ? (
+                <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '3rem 0' }}>⏳ Loading groups...</p>
+              ) : displayGroups.length === 0 ? (
+                <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+                  <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>👥</div>
+                  <p style={{ color: 'var(--text-muted)' }}>
+                    {activeTab === 'my' ? "You haven't joined any groups yet." : "No groups found."}
+                  </p>
+                  <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setActiveTab('all')}>
+                    Browse All Groups
+                  </button>
+                </div>
+              ) : (
+                <div className="groups-page-grid">
+                  {displayGroups.map(g => (
+                    <GroupCard
+                      key={g._id}
+                      g={g}
+                      onJoin={handleJoin}
+                      onLeave={handleLeave}
+                      onView={(selected) => setSelectedGroup(selected)}
+                      currentUserId={currentUserId}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </main>
       </div>
